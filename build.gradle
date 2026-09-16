@@ -1,0 +1,4 @@
+// 顶层构建文件（仅统一插件版本，无额外依赖）
+plugins {
+    id 'com.android.application' version '8.5.0' apply false
+}

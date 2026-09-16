@@ -1,0 +1,11 @@
+# Android / Gradle 构建产物
+*.iml
+.gradle/
+build/
+local.properties
+.externalNativeBuild/
+captures/
+.DS_Store
+
+# 不提交本地签名配置
+keystore.properties

@@ -60,13 +60,12 @@
   .card{
     width:var(--cw);height:var(--ch);background:var(--card);border-radius:9px;position:relative;
     box-shadow:0 2px 6px var(--shadow);border:1px solid #d8d8c8;color:var(--black);
-    display:inline-flex;flex-direction:column;justify-content:space-between;padding:7px 8px;
-    font-weight:800;cursor:pointer;transition:transform .12s;flex:0 0 auto;
+    font-weight:800;cursor:pointer;transition:transform .12s;flex:0 0 auto;overflow:hidden;
   }
   .card.red{color:var(--red);}
-  .card .corner{font-size:var(--corner);line-height:1;}
-  .card .corner.bottom{align-self:flex-end;transform:rotate(180deg);}
-  .card .pip{font-size:var(--pip);text-align:center;align-self:center;margin-top:-6px;}
+  .card .corner{position:absolute;top:3px;left:5px;font-size:var(--corner);line-height:1.05;text-align:center;}
+  .card .corner.bottom{top:auto;left:auto;bottom:3px;right:5px;transform:rotate(180deg);}
+  .card .pip{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:var(--pip);}
   .card.small{width:var(--scw);height:var(--sch);}
   .card.small .corner{font-size:var(--scorner);}
   .card.small .pip{font-size:var(--spip);}
@@ -195,7 +194,7 @@
     <div class="opt"><input type="checkbox" id="optSpade2"><label for="optSpade2">黑桃2翻倍（留♠2且剩牌≥8张，总分×2）</label></div>
     <div class="opt"><input type="checkbox" id="optReport"><label for="optReport">报单顶大（剩1张自动报单提示）</label></div>
     <div class="opt"><label>结束目标（罚分）：</label><input type="number" id="optTarget" value="100" min="0" style="width:70px"></div>
-    <p style="opacity:.8;font-size:12px">说明：累计罚分先达到目标的玩家出局，最终罚分最低者胜。设为0则不限，手动「重新开始」结束。</p>
+    <p style="opacity:.8;font-size:12px">说明：任一玩家累计罚分达到目标值时本轮比赛结束——累计罚分清零并重新洗牌，开始新一轮（每轮最低分者获胜）。设为0则不限。顶部「重新开始」可随时完全重置。</p>
     <div class="row"><button class="btn" id="btnCloseSettings">保存</button></div>
   </div>
 </div>
@@ -368,34 +367,51 @@ const settings={spade2:false,report:true,target:100};
 let state=null;
 let selected=new Set();
 
-function newGame(){
+function deal(){
   const deck=shuffle(buildDeck());
-  const players=[
-    {name:'你',isAI:false,hand:[]},
-    {name:'左家',isAI:true,hand:[]},
-    {name:'上家',isAI:true,hand:[]},
-    {name:'右家',isAI:true,hand:[]},
-  ];
-  for(let i=0;i<52;i++) players[i%4].hand.push(deck[i]);
-  players.forEach(sortHand);
-  let leader=0;
-  players.forEach((p,i)=>{if(p.hand.some(c=>c.suit==='♦'&&c.rank==='3'))leader=i;});
-  state={
-    players,current:leader,leader,tablePlay:null,lastPlayer:leader,passCount:0,
-    round:1,cum:[0,0,0,0],finished:false,firstPlayDone:false,lastAction:[null,null,null,null],
-    log:[]
-  };
-  selected.clear();
-  log(`第1局开始，由持♦3的【${players[leader].name}】先出。`);
-  render();
-  scheduleTurn();
+  state.players.forEach(p=>p.hand=[]);
+  for(let i=0;i<52;i++) state.players[i%4].hand.push(deck[i]);
+  state.players.forEach(sortHand);
 }
-function startRound(leader){
+function d3Holder(){
+  return state.players.findIndex(p=>p.hand.some(c=>c.suit==='♦'&&c.rank==='3'));
+}
+function newGame(){
+  state={
+    players:[
+      {name:'你',isAI:false,hand:[]},
+      {name:'左家',isAI:true,hand:[]},
+      {name:'上家',isAI:true,hand:[]},
+      {name:'右家',isAI:true,hand:[]},
+    ],
+    current:0,leader:0,tablePlay:null,lastPlayer:0,passCount:0,
+    round:1,cum:[0,0,0,0],finished:false,firstPlayDone:false,
+    lastAction:[null,null,null,null],log:[],matchOver:false
+  };
+  deal();
+  beginRound(d3Holder(),true);
+}
+function beginRound(leader,isFirst){
   state.tablePlay=null;state.lastPlayer=leader;state.passCount=0;state.current=leader;
-  state.finished=false;state.firstPlayDone=(state.round!==1);state.lastAction=[null,null,null,null];
+  state.finished=false;state.firstPlayDone=!isFirst;state.lastAction=[null,null,null,null];
   selected.clear();
-  log(`第${state.round}局开始，由【${state.players[leader].name}】先出。`);
+  log(isFirst
+    ?`第${state.round}局开始，由持♦3的【${state.players[leader].name}】先出（第一手必须含♦3）。`
+    :`第${state.round}局开始，重新洗牌完毕，由上局胜者【${state.players[leader].name}】先出。`);
   render();scheduleTurn();
+}
+// 进入下一局：重新洗牌发牌；reset=true 表示新一轮比赛（累计分清零，♦3先出）
+function startNextHand(reset){
+  const winner=state.players.findIndex(p=>p.hand.length===0);
+  deal();
+  if(reset){
+    state.round=1;state.cum=[0,0,0,0];state.matchOver=false;
+    log('🔄 累计罚分已达目标，重新洗牌，开始新一轮比赛（累计罚分清零）。');
+    beginRound(d3Holder(),true);
+  } else {
+    state.round++;state.matchOver=false;
+    beginRound(winner<0?0:winner,false);
+  }
 }
 function nextPlayer(i){return (i+1)%4;}
 
@@ -518,10 +534,12 @@ function endRound(winner){
 
 // ---------- 渲染 ----------
 function el(id){return document.getElementById(id);}
-function cardHTML(c,small){
+function cardHTML(c,opt){
+  opt=opt||{};
   const red=(c.suit==='♥'||c.suit==='♦')?' red':'';
-  const s=small?' small':'';
-  return `<div class="card${red}${s}" data-id="${c.id}">
+  const s=opt.small?' small':'';
+  const sel=opt.selected?' selected':'';
+  return `<div class="card${red}${s}${sel}" data-id="${c.id}">
     <div class="corner">${c.rank}<br>${c.suit}</div>
     <div class="pip">${c.suit}</div>
     <div class="corner bottom">${c.rank}<br>${c.suit}</div></div>`;
@@ -542,10 +560,7 @@ function render(){
   // 手牌
   const hd=el('seat-hand');
   hd.innerHTML=`<div class="handrow">${state.players[0].hand.map(c=>
-    `<div class="card${(c.suit==='♥'||c.suit==='♦')?' red':''}${selected.has(c.id)?' selected':''}" data-id="${c.id}">
-      <div class="corner">${c.rank}<br>${c.suit}</div>
-      <div class="pip">${c.suit}</div>
-      <div class="corner bottom">${c.rank}<br>${c.suit}</div></div>`).join('')}</div>`;
+    cardHTML(c,{selected:selected.has(c.id)})).join('')}</div>`;
   hd.querySelectorAll('.card').forEach(div=>div.onclick=()=>{
     const id=div.dataset.id;
     if(selected.has(id))selected.delete(id);else selected.add(id);
@@ -593,11 +608,8 @@ function setCtrlHint(t){el('ctrlHint').textContent=t;}
 // ---------- 结算弹窗 ----------
 function showResult(winner,penalties,roundScore){
   const hasTarget=settings.target>0;
-  let matchOver=false, champ=-1;
-  if(hasTarget){
-    const over=state.cum.map((s,i)=>s>=settings.target);
-    if(over.some(Boolean)){matchOver=true;champ=state.cum.indexOf(Math.min(...state.cum));}
-  }
+  const matchOver=hasTarget && state.cum.some(s=>s>=settings.target);
+  state.matchOver=matchOver;
   el('resultTitle').innerHTML=`<span class="winner">🏆 本局胜者：${state.players[winner].name}</span>`;
   let body=`<table><tr><th>玩家</th><th>剩牌</th><th>本局罚分</th><th>本局得分</th><th>累计罚分</th></tr>`;
   state.players.forEach((p,i)=>{
@@ -606,11 +618,15 @@ function showResult(winner,penalties,roundScore){
   });
   body+=`</table>`;
   if(matchOver){
-    body+=`<p class="winner">🎉 比赛结束！累计罚分最低者【${state.players[champ].name}】获胜！</p>`;
-    el('btnNext').style.display='none';
-  } else {
+    const champ=state.cum.indexOf(Math.min(...state.cum));
+    body+=`<p class="winner">🎯 累计罚分已达 ${settings.target}，本轮比赛结束！最低分：【${state.players[champ].name}】</p>`;
+    el('btnNext').textContent='开始新一轮';
     el('btnNext').style.display='';
-    body+=`<p style="opacity:.85;font-size:13px">点击下方「下一局」继续，由本局胜者先出。</p>`;
+    body+=`<p style="opacity:.85;font-size:13px">点击「开始新一轮」：累计罚分清零，重新洗牌开局。</p>`;
+  } else {
+    el('btnNext').textContent='下一局';
+    el('btnNext').style.display='';
+    body+=`<p style="opacity:.85;font-size:13px">点击「下一局」：重新洗牌，由本局胜者先出。</p>`;
   }
   el('resultBody').innerHTML=body;
   el('resultOverlay').classList.add('show');
@@ -621,11 +637,7 @@ el('btnPlay').onclick=humanPlay;
 el('btnPass').onclick=humanPass;
 el('btnHint').onclick=humanHint;
 el('btnNew').onclick=()=>{el('resultOverlay').classList.remove('show');newGame();};
-el('btnNext').onclick=()=>{
-  const winner=state.players.findIndex(p=>p.hand.length===0);
-  state.round++;state.leader=winner;el('resultOverlay').classList.remove('show');
-  startRound(winner);
-};
+el('btnNext').onclick=()=>{el('resultOverlay').classList.remove('show');startNextHand(!!state.matchOver);};
 el('btnRestart').onclick=()=>{el('resultOverlay').classList.remove('show');newGame();};
 el('btnRules').onclick=()=>el('rulesOverlay').classList.add('show');
 el('btnCloseRules').onclick=()=>el('rulesOverlay').classList.remove('show');
